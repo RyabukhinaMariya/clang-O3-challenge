@@ -37,6 +37,10 @@
 #include <llvm/Transforms/Utils/LoopSimplify.h>
 #include <llvm/Transforms/Scalar/LICM.h>
 
+#include "llvm/Transforms/Scalar/IndVarSimplify.h"
+#include "llvm/Transforms/Scalar/LICM.h"
+#include "llvm/Transforms/Scalar/EarlyCSE.h"
+
 #include <optional>
 #include <string>
 
@@ -108,6 +112,23 @@ bool Optimizer::optimizeIR() {
     FPM.addPass(SROAPass(SROAOptions::ModifyCFG));
     FPM.addPass(InstCombinePass());
     FPM.addPass(SinkingPass());
+    FPM.addPass(EarlyCSEPass());
+    FPM.addPass(LoopSimplifyPass());
+
+    FPM.addPass(createFunctionToLoopPassAdaptor(LoopRotatePass()));
+
+    FPM.addPass(createFunctionToLoopPassAdaptor(LICMPass(LICMOptions()), true));
+
+    FPM.addPass(createFunctionToLoopPassAdaptor(IndVarSimplifyPass()));
+
+    FPM.addPass(InstCombinePass());
+
+    FPM.addPass(LoopVectorizePass());
+
+    FPM.addPass(InstCombinePass());
+    FPM.addPass(SimplifyCFGPass());
+
+    MPM.addPass(createModuleToFunctionPassAdaptor(std::move(FPM)));
 
     MPM.addPass(createModuleToFunctionPassAdaptor(std::move(FPM)));
   }
