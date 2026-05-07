@@ -108,29 +108,51 @@ bool Optimizer::optimizeIR() {
     }
   } else {
     /// TODO: Extend pipeline here (extend \c MPM).
-    FunctionPassManager FPM;
-    FPM.addPass(SROAPass(SROAOptions::ModifyCFG));
-    FPM.addPass(InstCombinePass());
-    FPM.addPass(SinkingPass());
-    FPM.addPass(EarlyCSEPass());
-    FPM.addPass(LoopSimplifyPass());
+    
+      // cleaning
+      FunctionPassManager FirstFPM;
+      FirstFPM.addPass(SROAPass(SROAOptions::ModifyCFG));
+      FirstFPM.addPass(InstCombinePass());
+      FirstFPM.addPass(SimplifyCFGPass());
+      MPM.addPass(createModuleToFunctionPassAdaptor(std::move(FirstFPM)));
+    }
 
-    FPM.addPass(createFunctionToLoopPassAdaptor(LoopRotatePass()));
+    {
+      CGSCCPassManager CGPM;
+      CGPM.addPass(PostOrderFunctionAttrsPass());
+      CGPM.addPass(InlinerPass());
+      MPM.addPass(createModuleToPostOrderCGSCCPassAdaptor(std::move(CGPM)));
+    }
 
-    FPM.addPass(createFunctionToLoopPassAdaptor(LICMPass(LICMOptions()), true));
+    {
+      FunctionPassManager MainFPM;
 
-    FPM.addPass(createFunctionToLoopPassAdaptor(IndVarSimplifyPass()));
+      // cleaning
+      MainFPM.addPass(SROAPass(SROAOptions::ModifyCFG));
+      MainFPM.addPass(InstCombinePass());
+      MainFPM.addPass(SimplifyCFGPass());
 
-    FPM.addPass(InstCombinePass());
+      // Loop preparation
+      MainFPM.addPass(LoopSimplifyPass());
+      MainFPM.addPass(createFunctionToLoopPassAdaptor(LoopRotatePass()));
+      MainFPM.addPass(createFunctionToLoopPassAdaptor(LICMPass(LICMOptions()), true)); 
+      MainFPM.addPass(createFunctionToLoopPassAdaptor(SimpleLoopUnswitchPass(true)));
+      MainFPM.addPass(createFunctionToLoopPassAdaptor(IndVarSimplifyPass()));
+      
+      // cleaning
+      MainFPM.addPass(LoopSimplifyPass());
+      MainFPM.addPass(InstCombinePass());
+      MainFPM.addPass(SimplifyCFGPass());
+      MainFPM.addPass(createFunctionToLoopPassAdaptor(LoopDeletionPass()));
 
-    FPM.addPass(LoopVectorizePass());
+      // vectorization
+      MainFPM.addPass(LoopVectorizePass());
+      MainFPM.addPass(SLPVectorizerPass());
+      MainFPM.addPass(VectorCombinePass());
 
-    FPM.addPass(InstCombinePass());
-    FPM.addPass(SimplifyCFGPass());
-
-    MPM.addPass(createModuleToFunctionPassAdaptor(std::move(FPM)));
-
-    MPM.addPass(createModuleToFunctionPassAdaptor(std::move(FPM)));
+      // cleaning
+      MainFPM.addPass(InstCombinePass());
+      MainFPM.addPass(SimplifyCFGPass());
   }
   MPM.addPass(VerifierPass());
 
